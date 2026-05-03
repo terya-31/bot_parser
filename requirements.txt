@@ -62,3 +62,4 @@ wsproto==1.2.0
 yarl==1.23.0
 fs-football-fork
 feedparser==6.0.10
+webdriver-manager
