@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
+from collections import defaultdict
 
 try:
     from config import BASE_URL, LEAGUES, SELECTORS, PARSER_CONFIG, VALID_RESULTS
@@ -15,11 +16,8 @@ except ImportError:
     print("❌ Ошибка: не найден файл config.py")
     exit(1)
 
-# parser.py - в начало файла, после импортов
-
 def get_chromedriver_path():
     """Автоматически находит путь к ChromeDriver"""
-    # Проверяем, установлен ли ChromeDriver через which
     try:
         result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True)
         if result.returncode == 0:
@@ -27,7 +25,6 @@ def get_chromedriver_path():
     except:
         pass
     
-    # Проверяем стандартные пути
     common_paths = [
         '/usr/local/bin/chromedriver',
         '/usr/bin/chromedriver',
@@ -37,7 +34,6 @@ def get_chromedriver_path():
         if os.path.exists(path):
             return path
     
-    # Если не нашли, используем webdriver-manager
     return None
 
 class LeagueParser:
@@ -49,7 +45,6 @@ class LeagueParser:
         self.league_key = league_key
         self.league_config = LEAGUES[league_key]
         
-        # Настройки headless
         if headless is None:
             headless = PARSER_CONFIG.get('headless', False)
         
@@ -61,7 +56,25 @@ class LeagueParser:
             options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--user-agent=Mozilla/5.0')
         
-        self.driver = webdriver.Chrome(options=options)
+        # Получаем путь к ChromeDriver
+        chromedriver_path = get_chromedriver_path()
+        
+        from selenium.webdriver.chrome.service import Service
+        
+        if chromedriver_path:
+            print(f"✅ Используем ChromeDriver: {chromedriver_path}")
+            service = Service(chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=options)
+        else:
+            print("⚠️ ChromeDriver не найден, пробуем webdriver-manager...")
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except Exception as e:
+                print(f"❌ Ошибка установки ChromeDriver: {e}")
+                raise
+        
         self.wait = WebDriverWait(self.driver, PARSER_CONFIG.get('wait_time', 15))
         
         # Создаём директории
@@ -71,21 +84,9 @@ class LeagueParser:
         
         print(f"\n🚀 Запуск парсера для {self.league_config['name']}")
         print(f"📁 Данные будут сохранены в: {self.data_dir}")
-
-        # Получаем путь к ChromeDriver
-    chromedriver_path = get_chromedriver_path()
     
-        if chromedriver_path:
-            from selenium.webdriver.chrome.service import Service
-            service = Service(chromedriver_path)
-            self.driver = webdriver.Chrome(service=service, options=options)
-        else:
-            # Fallback: используем webdriver-manager
-            from webdriver_manager.chrome import ChromeDriverManager
-            from selenium.webdriver.chrome.service import Service
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
-        
+    # ... остальные методы (get_team_links, get_match_stats и т.д.) остаются без изменений
+    
     def get_team_links(self):
         """Получает список команд из таблицы лиги"""
         print(f"🌐 Загружаем таблицу {self.league_config['name']}...")
