@@ -2,6 +2,7 @@
 import time
 import json
 import os
+import subprocess
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,6 +14,31 @@ try:
 except ImportError:
     print("❌ Ошибка: не найден файл config.py")
     exit(1)
+
+# parser.py - в начало файла, после импортов
+
+def get_chromedriver_path():
+    """Автоматически находит путь к ChromeDriver"""
+    # Проверяем, установлен ли ChromeDriver через which
+    try:
+        result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except:
+        pass
+    
+    # Проверяем стандартные пути
+    common_paths = [
+        '/usr/local/bin/chromedriver',
+        '/usr/bin/chromedriver',
+        '/app/chromedriver'
+    ]
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+    
+    # Если не нашли, используем webdriver-manager
+    return None
 
 class LeagueParser:
     def __init__(self, league_key, headless=None):
@@ -45,7 +71,21 @@ class LeagueParser:
         
         print(f"\n🚀 Запуск парсера для {self.league_config['name']}")
         print(f"📁 Данные будут сохранены в: {self.data_dir}")
+
+        # Получаем путь к ChromeDriver
+    chromedriver_path = get_chromedriver_path()
     
+        if chromedriver_path:
+            from selenium.webdriver.chrome.service import Service
+            service = Service(chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=options)
+        else:
+            # Fallback: используем webdriver-manager
+            from webdriver_manager.chrome import ChromeDriverManager
+            from selenium.webdriver.chrome.service import Service
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=options)
+        
     def get_team_links(self):
         """Получает список команд из таблицы лиги"""
         print(f"🌐 Загружаем таблицу {self.league_config['name']}...")
