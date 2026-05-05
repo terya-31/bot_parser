@@ -1,6 +1,7 @@
 # ind_analyze.py - автоматический анализ всех команд
 import json
 import os
+import sys
 from datetime import datetime
 from collections import defaultdict
 
@@ -501,8 +502,8 @@ def generate_full_team_report(team_data):
 def generate_short_stats_table(all_teams_data):
     """Генерирует краткую статистическую таблицу по всем командам"""
     
-    table = "| № | Команда | Лига | Форма | Очки | Голы (за/против) | xG | Удары | Угловые |\n"
-    table += "|---|---------|------|-------|------|-------------------|-----|-------|---------|\n"
+    table = "| № | Команда | Лига | Форма | Очки | Голы (з/п) | xG | Уд | Уг |\n"
+    table += "|---|---------|------|-------|------|------------|----|----|----|\n"
     
     # Сортируем по очкам
     sorted_teams = sorted(all_teams_data, key=lambda x: x['points'], reverse=True)
@@ -657,6 +658,11 @@ def main():
         analyze_all_teams_and_save()
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == '--auto':
+        # Автоматический режим без вопросов
+        print("🚀 Запуск в автоматическом режиме...")
+        analyze_all_teams_and_save()
+    else:
+        main()
 
 LEAGUES = LEAGUES

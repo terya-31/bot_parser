@@ -37,7 +37,68 @@ def get_chromedriver_path():
     return None
 
 class LeagueParser:
-    def __init__(self, league_key, headless=None):
+
+    def __init__(self, league_key, headless=True):
+        """Инициализация парсера для конкретной лиги"""
+        if league_key not in LEAGUES:
+            raise ValueError(f"Лига {league_key} не найдена в конфигурации")
+        
+        self.league_key = league_key
+        self.league_config = LEAGUES[league_key]
+        
+        if headless is None:
+            headless = PARSER_CONFIG.get('headless', False)
+        
+        options = webdriver.ChromeOptions()
+        
+        if headless:
+            options.add_argument('--headless')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            # КРИТИЧЕСКИ ВАЖНЫЕ опции для headless-режима
+            options.add_argument('--window-size=1920,1080')  # Фиксированный размер окна
+            options.add_argument('--start-maximized')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+        
+        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
+        # Отключаем загрузку изображений для ускорения
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        options.add_experimental_option("prefs", prefs)
+        
+        # Получаем путь к ChromeDriver
+        chromedriver_path = get_chromedriver_path()
+        
+        from selenium.webdriver.chrome.service import Service
+        
+        if chromedriver_path:
+            print(f"✅ Используем ChromeDriver: {chromedriver_path}")
+            service = Service(chromedriver_path)
+            self.driver = webdriver.Chrome(service=service, options=options)
+        else:
+            print("⚠️ ChromeDriver не найден, пробуем webdriver-manager...")
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except Exception as e:
+                print(f"❌ Ошибка установки ChromeDriver: {e}")
+                raise
+        
+        self.wait = WebDriverWait(self.driver, PARSER_CONFIG.get('wait_time', 15))
+        
+        # Создаём директории
+        self.data_dir = f'leagues/{self.league_config["filename"]}'
+        self.teams_dir = f'{self.data_dir}/teams'
+        os.makedirs(self.teams_dir, exist_ok=True)
+        
+        print(f"\n🚀 Запуск парсера для {self.league_config['name']}")
+        print(f"📁 Данные будут сохранены в: {self.data_dir}")
+
+    def l__init__(self, league_key, headless=True):
         """Инициализация парсера для конкретной лиги"""
         if league_key not in LEAGUES:
             raise ValueError(f"Лига {league_key} не найдена в конфигурации")
@@ -121,6 +182,45 @@ class LeagueParser:
         self.driver.get(match_url)
         time.sleep(PARSER_CONFIG.get('click_delay', 2))
         
+        # Открываем вкладку "Статистика" через JS
+        try:
+            stats_tab = self.driver.find_element(By.XPATH, f"//button[contains(text(), '{SELECTORS['stats_tab_text']}')]")
+            self.driver.execute_script("arguments[0].click();", stats_tab)
+            time.sleep(PARSER_CONFIG.get('click_delay', 2))
+            print(f"      📊 Вкладка 'Статистика' открыта")
+        except:
+            print('Вкладка "Статистика" не открыта!')
+            return {}
+        
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        stats = {}
+        
+        container = soup.find('div', class_=SELECTORS['stat_row'])
+        if not container:
+            return {}
+        
+        stat_elements = container.find_all('span', class_=SELECTORS['stat_name'])
+        
+        for i in range(0, len(stat_elements) - 2, 3):
+            try:
+                home_value = stat_elements[i].text.strip()
+                stat_name = stat_elements[i + 1].text.strip()
+                away_value = stat_elements[i + 2].text.strip()
+                
+                stats[stat_name] = {
+                    'home': home_value,
+                    'away': away_value
+                }
+            except:
+                continue
+        
+        return stats
+
+    def get_match_stats_(self, match_url):
+        """Собирает расширенную статистику матча"""
+        self.driver.get(match_url)
+        time.sleep(PARSER_CONFIG.get('click_delay', 2))
+        
         # Открываем вкладку "Статистика"
         try:
             stats_tab = self.driver.find_element(By.XPATH, f"//button[contains(text(), '{SELECTORS['stats_tab_text']}')]")
@@ -154,6 +254,100 @@ class LeagueParser:
         return stats
     
     def get_team_results(self, team_name, team_url):
+        """Собирает результаты для одной команды"""
+        self.driver.get(team_url)
+        time.sleep(PARSER_CONFIG.get('click_delay', 2))
+        
+        # Ждём, пока загрузится страница
+        try:
+            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "tabs")))
+        except:
+            pass
+        
+        # Открываем вкладку "Результаты" через JavaScript (работает в headless)
+        try:
+            # Ищем кнопку/ссылку с текстом "Результаты"
+            results_tab = self.driver.find_element(By.XPATH, f"//a[contains(text(), '{SELECTORS['results_tab_text']}')]")
+            # Кликаем через JS
+            self.driver.execute_script("arguments[0].click();", results_tab)
+            time.sleep(PARSER_CONFIG.get('click_delay', 2))
+            print(f"    ✅ Вкладка 'Результаты' открыта")
+        except Exception as e:
+            print(f"    ⚠️ Ошибка открытия вкладки: {e}")
+            return []
+        
+        # Ждём загрузки матчей
+        try:
+            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "event__match")))
+        except:
+            pass
+        
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        matches = []
+        
+        # Ищем матчи
+        match_links = soup.find_all('a', class_=SELECTORS['match_link'])
+        limit = PARSER_CONFIG.get('matches_per_team', 10)
+        
+        for match_link in match_links[:limit]:
+            try:
+                match_block = match_link.find_parent('div', class_=SELECTORS['match_block'])
+                if not match_block:
+                    continue
+                
+                # Домашняя команда
+                home_div = match_block.find('div', class_=SELECTORS['home_participant'])
+                home_team = '?'
+                if home_div:
+                    home_name_span = home_div.find('span', class_=SELECTORS['team_name'])
+                    home_team = home_name_span.text.strip() if home_name_span else '?'
+                
+                # Гостевая команда
+                away_div = match_block.find('div', class_=SELECTORS['away_participant'])
+                away_team = '?'
+                if away_div:
+                    away_name_span = away_div.find('span', class_=SELECTORS['team_name'])
+                    away_team = away_name_span.text.strip() if away_name_span else '?'
+                
+                # Счёт
+                home_score_elem = match_block.find('span', class_=SELECTORS['home_score'])
+                home_score = home_score_elem.text.strip() if home_score_elem else '?'
+                
+                away_score_elem = match_block.find('span', class_=SELECTORS['away_score'])
+                away_score = away_score_elem.text.strip() if away_score_elem else '?'
+                
+                # Исход
+                result_elems = match_block.find_all('span', class_=SELECTORS['result_text'])
+                result_text = '?'
+                for elem in result_elems:
+                    text = elem.text.strip()
+                    if text in VALID_RESULTS:
+                        result_text = text
+                        break
+                
+                # URL матча
+                match_url = match_link.get('href')
+                if match_url and not match_url.startswith('http'):
+                    match_url = BASE_URL + match_url
+                
+                # Собираем статистику
+                stats = self.get_match_stats(match_url) if match_url else {}
+                
+                matches.append({
+                    'home': home_team,
+                    'away': away_team,
+                    'home_score': home_score,
+                    'away_score': away_score,
+                    'result': result_text,
+                    'stats': stats
+                })
+                
+            except Exception as e:
+                continue
+        
+        return matches
+    
+    def get_team_results_(self, team_name, team_url):
         """Собирает результаты для одной команды"""
         self.driver.get(team_url)
         time.sleep(PARSER_CONFIG.get('click_delay', 2))
